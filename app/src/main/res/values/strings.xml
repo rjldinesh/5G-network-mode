@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">5G Network Mode</string>
+    <string name="network">Network</string>
+
+    <string name="interstitial">ca-app-pub-2973027179334512/3567304983</string>
+    <string name="appId">ca-app-pub-2973027179334512~8841303653</string>
+    <string name="signal">Signal</string>
+    <string name="tower">Tower</string>
+    <string name="network_mode_switcher">Network Mode Switcher</string>
+    <string name="network_mode_switcher_description">Tap below to open the hidden Android network settings where you can manually switch 4G or 5G mode.</string>
+    <string name="open_setting">Open Network Settings</string>
+    <string name="switch_not_supported">Direct 4G/5G switch isn’t supported on this device.</string>
+    <string name="back">Back</string>
+    <string name="unable_to_open_settings">Could not open Phone Info screen on this device</string>
+    <string name="location_permission_required">Location permission not granted</string>
+    <string name="connected">Connected</string>
+    <string name="connecting">Connecting</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="permission_request_title">Permission Required</string>
+    <string name="location_permission_needed_message">Location permission is needed to read nearby cell tower information.</string>
+    <string name="data_usage">Data Usage</string>
+</resources>

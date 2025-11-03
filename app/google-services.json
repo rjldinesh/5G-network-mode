@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "373937623634",
+    "project_id": "hydrohabit-c71bc",
+    "storage_bucket": "hydrohabit-c71bc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:373937623634:android:6a050d38873a717320858b",
+        "android_client_info": {
+          "package_name": "net.hydrohabit.drinkreminder"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6hYajuq9853mNJYFPLmvo2wUrkasQeG4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:373937623634:android:6ee9b77c0b0fd0a920858b",
+        "android_client_info": {
+          "package_name": "net.peaksoftstudios.fiveg.networkmode"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA6hYajuq9853mNJYFPLmvo2wUrkasQeG4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
