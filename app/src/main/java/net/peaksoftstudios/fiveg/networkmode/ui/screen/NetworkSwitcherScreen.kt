@@ -1,13 +1,17 @@
 package net.peaksoftstudios.fiveg.networkmode.ui.screen
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
 import android.widget.Toast
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,7 +29,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.peaksoftstudios.fiveg.networkmode.R
 
@@ -36,10 +44,50 @@ fun NetworkSwitcherScreen() {
     var simList by remember { mutableStateOf<List<SubscriptionInfo>>(emptyList()) }
     var selectedSimIndex by remember { mutableStateOf(0) }
 
-    // Load active SIM info
-    LaunchedEffect(Unit) {
-        simList = getActiveSimList(context)
+
+    // Launcher for requesting runtime permission
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            // load SIMs once permission granted
+            CoroutineScope(Dispatchers.Main).launch {
+                simList = getActiveSimList(context)
+            }
+        } else {
+            Toast.makeText(context, "Permission required to read SIM info", Toast.LENGTH_SHORT).show()
+        }
     }
+
+    LaunchedEffect(Unit) {
+        // Check permission before fetching
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            Manifest.permission.READ_BASIC_PHONE_STATE // or READ_PRECISE_PHONE_STATE depending on need
+        else
+            Manifest.permission.READ_PHONE_STATE
+
+        if (ContextCompat.checkSelfPermission(context, permission)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            simList = getActiveSimList(context)
+        } else {
+            permissionLauncher.launch(permission)
+        }
+    }
+
+
+
+
+//    // Load active SIM info
+//    LaunchedEffect(Unit) {
+//        simList = getActiveSimList(context)
+//
+//        // ✅ Retry after small delay if initially empty
+//        if (simList.isEmpty()) {
+//            delay(2000)
+//            simList = getActiveSimList(context)
+//        }
+//    }
 
     Scaffold(
         topBar = {
@@ -83,29 +131,7 @@ fun NetworkSwitcherScreen() {
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
 
-                // Action button
-                Button(
-                    onClick = {
-                        openPhoneInfo(context)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Default.NetworkCell, contentDescription = "Network", tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Open Network Settings", color = Color.White)
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Use this option to manually change network preferences for the selected SIM.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray),
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
             } else {
                 Text(
                     "No active SIM cards detected.",
@@ -113,6 +139,30 @@ fun NetworkSwitcherScreen() {
                     modifier = Modifier.padding(top = 32.dp)
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Action button
+            Button(
+                onClick = {
+                    openPhoneInfo(context)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(Icons.Default.NetworkCell, contentDescription = "Network", tint = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Open Network Settings", color = Color.White)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Use this option to manually change network preferences for the selected SIM.",
+                style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray),
+                modifier = Modifier.padding(horizontal = 8.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
         }
     }
 }

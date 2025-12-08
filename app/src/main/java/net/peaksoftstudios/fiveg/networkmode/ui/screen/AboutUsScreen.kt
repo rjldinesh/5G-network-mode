@@ -1,6 +1,7 @@
 package net.peaksoftstudios.fiveg.networkmode.ui.screen
 
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -18,6 +20,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import net.peaksoftstudios.fiveg.networkmode.manager.InAppRatingManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -25,8 +29,11 @@ fun AboutUsScreen(
     onBack: () -> Unit,
     onOpenWebLink: (String, String) -> Unit
 ) {
+
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val versionName = "1.0"
+    val activity = context as Activity
+    val versionName = "1.1"
 
     Scaffold(
         topBar = {
@@ -72,7 +79,7 @@ fun AboutUsScreen(
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(24.dp))
-            VerticalDivider()
+            HorizontalDivider()
             Spacer(Modifier.height(16.dp))
 
             Text(
@@ -114,7 +121,7 @@ fun AboutUsScreen(
             }
 
             Spacer(Modifier.height(24.dp))
-            VerticalDivider()
+            HorizontalDivider()
             Spacer(Modifier.height(16.dp))
 
             Text(
@@ -151,6 +158,18 @@ fun AboutUsScreen(
                     )
                 }
             )
+
+            val context = LocalContext.current
+            val activity = context as Activity
+            Spacer(Modifier.height(20.dp))
+
+            Button(onClick = {
+                scope.launch {
+                    InAppRatingManager(activity, context).launchReviewWithFallback()
+                }
+            }) {
+                Text("Feedback ⭐")
+            }
         }
     }
 }

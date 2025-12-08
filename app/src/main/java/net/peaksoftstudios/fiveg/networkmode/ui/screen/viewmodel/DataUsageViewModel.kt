@@ -12,6 +12,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.peaksoftstudios.fiveg.networkmode.utils.PermissionUtils
+
 /**
  * Represents a single app's data usage entry.
  */
@@ -42,6 +44,15 @@ class DataUsageViewModel(private val context: Context) : ViewModel() {
         _uiState.value = DataUsageUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
             try {
+
+                // Check for permission
+                if (!PermissionUtils.hasUsagePermission(context)) {
+                    withContext(Dispatchers.Main) {
+                        _uiState.value = DataUsageUiState.Error("Usage Access permission not granted.")
+                    }
+                    return@launch
+                }
+
                 val data = getAppDataUsage(context)
                 withContext(Dispatchers.Main) {
                     _uiState.value =

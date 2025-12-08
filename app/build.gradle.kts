@@ -13,8 +13,8 @@ android {
         applicationId = "net.peaksoftstudios.fiveg.networkmode"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -65,5 +65,8 @@ dependencies {
     implementation(libs.firebase.messaging)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+
+    implementation("com.google.android.play:review-ktx:2.0.2") // latest stable
+
 
 }
