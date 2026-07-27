@@ -12,7 +12,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.peaksoftstudios.fiveg.networkmode.manager.DataLimitManager
 import net.peaksoftstudios.fiveg.networkmode.utils.PermissionUtils
+import java.util.Calendar
 
 /**
  * Represents a single app's data usage entry.
@@ -54,6 +56,9 @@ class DataUsageViewModel(private val context: Context) : ViewModel() {
                 }
 
                 val data = getAppDataUsage(context)
+                // Check data limit and fire notifications if needed
+                val totalBytes = data.sumOf { it.downloadBytes + it.uploadBytes }
+                DataLimitManager.checkAndNotify(context, totalBytes)
                 withContext(Dispatchers.Main) {
                     _uiState.value =
                         if (data.isNotEmpty()) DataUsageUiState.Success(data)
@@ -77,7 +82,16 @@ private fun getAppDataUsage(context: Context): List<AppDataUsage> {
     val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
     val result = mutableListOf<AppDataUsage>()
     val end = System.currentTimeMillis()
-    val start = end - 7 * 24 * 60 * 60 * 1000 // last 7 days
+    // Start of the current calendar month, so usage matches the "monthly" limit
+    // shown/notified by DataLimitManager and the DataUsageScreen banner.
+    val start = Calendar.getInstance().apply {
+        timeInMillis = end
+        set(Calendar.DAY_OF_MONTH, 1)
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
 
     for (app in apps) {
         val uid = app.uid

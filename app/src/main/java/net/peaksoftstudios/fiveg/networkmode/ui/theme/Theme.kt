@@ -1,5 +1,8 @@
 package net.peaksoftstudios.fiveg.networkmode.ui.theme
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -8,8 +11,22 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+
+/** Walks the Context wrapper chain to find the hosting Activity, instead of assuming a direct cast. */
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 private val DarkColorScheme = darkColorScheme(
     primary = Primary,
@@ -50,6 +67,27 @@ fun _4GNetworkModeTheme(
 
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
+    }
+
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        // Edge-to-edge (enableEdgeToEdge() in MainActivity) keeps the system bars
+        // transparent so app content draws behind them — we intentionally do NOT paint
+        // an opaque window.statusBarColor here. Doing so used to defeat edge-to-edge on
+        // API < 35 (and is a no-op on API 35+, where the platform ignores it), which is
+        // what caused edge-to-edge to not display for all users. We only adjust icon
+        // contrast, which stays compatible with fully transparent bars.
+        val useDarkStatusBarIcons = colorScheme.primary.luminance() > 0.5f
+        SideEffect {
+            val activity = view.context.findActivity()
+            if (activity != null) {
+                val insetsController = WindowCompat.getInsetsController(activity.window, view)
+                insetsController.isAppearanceLightStatusBars = useDarkStatusBarIcons
+                // The bottom NavigationBar in MainScreen is always drawn with a white
+                // background, so its icons/labels need dark system nav bar icons for contrast.
+                insetsController.isAppearanceLightNavigationBars = true
+            }
+        }
     }
 
     MaterialTheme(

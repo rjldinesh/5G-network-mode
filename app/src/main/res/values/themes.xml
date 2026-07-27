@@ -11,13 +11,14 @@
         <item name="postSplashScreenTheme">@style/Theme.FiveGNetworkMode</item>
     </style>
 
-    <!-- Base app theme (just bridge to Compose) -->
-    <style name="Theme.FiveGNetworkMode" parent="android:Theme.Light.NoTitleBar">
-        <item name="android:statusBarColor">#0070FF</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:navigationBarColor">@android:color/white</item>
-        <item
-            name="android:windowLightNavigationBar"
-            tools:targetApi="o_mr1">true</item>    </style>
+    <!-- Base app theme (just bridge to Compose).
+         Status/navigation bar color and icon appearance are intentionally NOT set here:
+         MainActivity calls enableEdgeToEdge() and _4GNetworkModeTheme (Theme.kt) drives
+         transparent system bars + icon contrast in code. Setting android:statusBarColor /
+         android:navigationBarColor / android:windowLightStatusBar / android:windowLightNavigationBar
+         here paints opaque bars on API < 35 (defeating edge-to-edge for those users) while
+         being ignored on API 35+, which is exactly what caused edge-to-edge to not display
+         for all users. -->
+    <style name="Theme.FiveGNetworkMode" parent="android:Theme.Light.NoTitleBar" />
 
 </resources>

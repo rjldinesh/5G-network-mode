@@ -33,7 +33,7 @@ fun AboutUsScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val activity = context as Activity
-    val versionName = "1.1"
+    val versionName = "1.7"
 
     Scaffold(
         topBar = {

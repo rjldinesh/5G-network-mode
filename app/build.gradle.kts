@@ -13,8 +13,8 @@ android {
         applicationId = "net.peaksoftstudios.fiveg.networkmode"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 7
+        versionName = "1.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -68,5 +68,13 @@ dependencies {
 
     implementation("com.google.android.play:review-ktx:2.0.2") // latest stable
 
+    // Glance (home screen widget)
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
+
+    // Pin androidx.fragment to a current version: play-services-ads and review-ktx
+    // transitively pull in fragment 1.1.0 (2019), which the Play Console flags as
+    // outdated. Declaring it directly makes Gradle resolve to the newer version.
+    implementation(libs.androidx.fragment)
 
 }

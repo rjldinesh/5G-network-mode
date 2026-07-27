@@ -28,7 +28,7 @@ fun MainScreen() {
     )
     )
 
-    val titles = listOf("Switch to 5G-4G", "Signal Information", "Cell Tower Details", "Data Usage by Apps")
+    val titles = listOf("Switch to 5G-4G", "Signal & Speed Test", "Cell Tower Details", "Data Usage by Apps")
 
     var showAbout by remember { mutableStateOf(false) }
 
@@ -45,11 +45,10 @@ fun MainScreen() {
             bottomBar = {
                 NavigationBar(containerColor = Color.White) {
                     val items = listOf(
-                        Triple(Icons.Filled.Home, R.string.network, 0),
+                        Triple(Icons.Filled.Home,  R.string.network, 0),
                         Triple(Icons.Filled.SignalCellularAlt, R.string.signal, 1),
                         Triple(Icons.Filled.BarChart, R.string.tower, 2),
                         Triple(Icons.Filled.DataUsage, R.string.data_usage, 3)
-
                     )
 
                     items.forEach { (icon, labelRes, index) ->
@@ -90,7 +89,6 @@ fun MainScreen() {
                     1 -> SignalStrengthScreen()
                     2 -> CellTowerScreen()
                     3 -> DataUsageScreen(dataUsageViewModel)
-
                 }
             }
         }

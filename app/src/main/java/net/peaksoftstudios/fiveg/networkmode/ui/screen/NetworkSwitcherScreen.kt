@@ -36,6 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.peaksoftstudios.fiveg.networkmode.R
+import net.peaksoftstudios.fiveg.networkmode.service.NetworkMonitorService
 
 
 @Composable
@@ -43,6 +44,7 @@ fun NetworkSwitcherScreen() {
     val context = LocalContext.current
     var simList by remember { mutableStateOf<List<SubscriptionInfo>>(emptyList()) }
     var selectedSimIndex by remember { mutableStateOf(0) }
+    var monitorEnabled by remember { mutableStateOf(NetworkMonitorService.isEnabled(context)) }
 
 
     // Launcher for requesting runtime permission
@@ -163,6 +165,35 @@ fun NetworkSwitcherScreen() {
                 modifier = Modifier.padding(horizontal = 8.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Network Change Alerts",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                    )
+                    Text(
+                        "Get notified when your network drops or changes type.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray)
+                    )
+                }
+                Switch(
+                    checked = monitorEnabled,
+                    onCheckedChange = { enabled ->
+                        monitorEnabled = enabled
+                        if (enabled) NetworkMonitorService.start(context)
+                        else NetworkMonitorService.stop(context)
+                    }
+                )
+            }
         }
     }
 }

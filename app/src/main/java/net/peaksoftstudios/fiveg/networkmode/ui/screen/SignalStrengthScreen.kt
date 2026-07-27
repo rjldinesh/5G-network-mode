@@ -20,7 +20,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import net.peaksoftstudios.fiveg.networkmode.manager.SignalEntry
+import net.peaksoftstudios.fiveg.networkmode.manager.SignalHistoryManager
 import net.peaksoftstudios.fiveg.networkmode.ui.components.AnimatedSignalStrengthGauge
+import net.peaksoftstudios.fiveg.networkmode.ui.components.SignalHistoryChart
+import net.peaksoftstudios.fiveg.networkmode.widget.WidgetKeys
 
 @Composable
 fun SignalStrengthScreen() {
@@ -32,6 +36,11 @@ fun SignalStrengthScreen() {
     var signalLevel by remember { mutableStateOf("—") }
     var signalLevelInt by remember { mutableIntStateOf(0) }
     var signalIntDbm by remember { mutableIntStateOf(0) }
+    var historyEntries by remember { mutableStateOf(SignalHistoryManager.snapshot()) }
+    // Throttles how often we persist to SharedPreferences / re-render the home screen
+    // widget, since raw signal-strength callbacks can fire many times per second.
+    var lastWidgetUpdateMs by remember { mutableLongStateOf(0L) }
+    val widgetUpdateIntervalMs = 3_000L
     var networkType by remember { mutableStateOf("Unknown") }
     var carrierName by remember { mutableStateOf("—") }
     var simInfo by remember { mutableStateOf("—") }
@@ -89,6 +98,15 @@ fun SignalStrengthScreen() {
                                 simInfo = sim
                                 cellId = cell
                                 dataState = state
+                                if (dbm != null) {
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastWidgetUpdateMs >= widgetUpdateIntervalMs) {
+                                        lastWidgetUpdateMs = now
+                                        SignalHistoryManager.record(dbm)
+                                        historyEntries = SignalHistoryManager.snapshot()
+                                        WidgetKeys.update(context, dbm, net, carrier, signalLevelText(level))
+                                    }
+                                }
                             })
                     }
                 }
@@ -111,6 +129,15 @@ fun SignalStrengthScreen() {
                                     simInfo = sim
                                     cellId = cell
                                     dataState = state
+                                    if (dbm != null) {
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastWidgetUpdateMs >= widgetUpdateIntervalMs) {
+                                            lastWidgetUpdateMs = now
+                                            SignalHistoryManager.record(dbm)
+                                            historyEntries = SignalHistoryManager.snapshot()
+                                            WidgetKeys.update(context, dbm, net, carrier, signalLevelText(level))
+                                        }
+                                    }
                                 })
                         }
                     }
@@ -140,7 +167,8 @@ fun SignalStrengthScreen() {
             carrierName = carrierName,
             simInfo = simInfo,
             cellId = cellId,
-            dataState = dataState
+            dataState = dataState,
+            historyEntries = historyEntries
         )
     }
 }
@@ -252,32 +280,114 @@ private fun SignalInfoView(
     carrierName: String,
     simInfo: String,
     cellId: String,
-    dataState: String
+    dataState: String,
+    historyEntries: List<SignalEntry>
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.Start
+            .verticalScroll(rememberScrollState())
     ) {
-        AnimatedSignalStrengthGauge(signalLevel = singnalLevelInPercentage, signalDbm = singalInIntDbm)
+        // ---- Speed Test (top) ----
+        Text(
+            "Speed Test",
+            style = MaterialTheme.typography.titleMedium.copy(
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            ),
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+        )
+        SpeedTestScreen()
 
-        InfoRow("Signal (dBm)", signalDbm)
-        InfoRow("Signal Quality", signalLevel)
-        InfoRow("Network Type", networkType)
-        InfoRow("Carrier", carrierName)
-        InfoRow("Cell ID", cellId)
-        InfoRow("Data Connection", dataState)
-        InfoRow("SIM Details", simInfo)
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        Spacer(Modifier.height(12.dp))
+
+        // ---- Signal gauge ----
+        AnimatedSignalStrengthGauge(
+            signalLevel = singnalLevelInPercentage,
+            signalDbm = singalInIntDbm,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        // ---- Two-column info grid ----
+        val infoItems = listOf(
+            "Signal (dBm)" to signalDbm,
+            "Signal Quality" to signalLevel,
+            "Network Type" to networkType,
+            "Carrier" to carrierName,
+            "Cell ID" to cellId,
+            "Data Connection" to dataState,
+        )
+
+        infoItems.chunked(2).forEach { pair ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pair.forEach { (title, value) ->
+                    InfoCard(title, value, Modifier.weight(1f))
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+
+        // SIM Details — full width
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(
+                    "SIM Details",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    simInfo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        SignalHistoryChart(
+            entries = historyEntries,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
-private fun InfoRow(title: String, value: String) {
-    Column(Modifier.padding(vertical = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground))
-        Text(value, style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.primary))
+private fun InfoCard(title: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     }
 }
 

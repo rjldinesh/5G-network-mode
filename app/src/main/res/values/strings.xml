@@ -19,4 +19,10 @@
     <string name="permission_request_title">Permission Required</string>
     <string name="location_permission_needed_message">Location permission is needed to read nearby cell tower information.</string>
     <string name="data_usage">Data Usage</string>
+    <string name="speed_test">Speed Test</string>
+    <string name="speed_test_title">Network Speed Test</string>
+    <string name="widget_description">Shows live signal strength, network type, and carrier</string>
+    <string name="network_alerts">Network Alerts</string>
+    <string name="data_limit">Data Limit</string>
+    <string name="signal_history">Signal History</string>
 </resources>
