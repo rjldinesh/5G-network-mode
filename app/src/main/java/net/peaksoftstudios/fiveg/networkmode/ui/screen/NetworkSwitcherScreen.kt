@@ -8,196 +8,195 @@ import android.os.Build
 import android.provider.Settings
 import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 import android.widget.Toast
-import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.NetworkCell
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.SimCard
-import androidx.compose.material.icons.filled.SignalCellularAlt
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import net.peaksoftstudios.fiveg.networkmode.R
 import net.peaksoftstudios.fiveg.networkmode.service.NetworkMonitorService
+import net.peaksoftstudios.fiveg.networkmode.ui.components.AppCard
+import net.peaksoftstudios.fiveg.networkmode.ui.components.HeroCaption
+import net.peaksoftstudios.fiveg.networkmode.ui.components.HeroCard
+import net.peaksoftstudios.fiveg.networkmode.ui.components.HeroEyebrow
+import net.peaksoftstudios.fiveg.networkmode.ui.components.HeroPill
+import net.peaksoftstudios.fiveg.networkmode.ui.components.IconTile
+import net.peaksoftstudios.fiveg.networkmode.ui.components.PrimaryActionButton
+import net.peaksoftstudios.fiveg.networkmode.ui.components.SectionEyebrow
+import net.peaksoftstudios.fiveg.networkmode.ui.theme.Amber
+import net.peaksoftstudios.fiveg.networkmode.ui.theme.Danger
+import net.peaksoftstudios.fiveg.networkmode.ui.theme.LavenderOnNavy
+import net.peaksoftstudios.fiveg.networkmode.ui.theme.Mint
 
+/** Snapshot of the currently active radio, shown in the hero card. */
+data class NetworkSnapshot(
+    val generation: String,   // "5G", "4G", "3G", "2G" or "—"
+    val technology: String,   // "LTE", "NR", "HSPA" … or "" when unknown
+    val carrier: String,
+    val dataState: Int        // TelephonyManager.DATA_*
+)
 
 @Composable
 fun NetworkSwitcherScreen() {
     val context = LocalContext.current
     var simList by remember { mutableStateOf<List<SubscriptionInfo>>(emptyList()) }
-    var selectedSimIndex by remember { mutableStateOf(0) }
+    var slotCount by remember { mutableIntStateOf(1) }
+    var selectedSimIndex by remember { mutableIntStateOf(0) }
     var monitorEnabled by remember { mutableStateOf(NetworkMonitorService.isEnabled(context)) }
+    var snapshot by remember { mutableStateOf<NetworkSnapshot?>(null) }
+    var hasPhonePermission by remember { mutableStateOf(hasPhoneStatePermission(context)) }
 
-
-    // Launcher for requesting runtime permission
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (isGranted) {
-            // load SIMs once permission granted
-            CoroutineScope(Dispatchers.Main).launch {
-                simList = getActiveSimList(context)
-            }
-        } else {
+        hasPhonePermission = isGranted
+        if (!isGranted) {
             Toast.makeText(context, "Permission required to read SIM info", Toast.LENGTH_SHORT).show()
         }
     }
 
     LaunchedEffect(Unit) {
-        // Check permission before fetching
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-            Manifest.permission.READ_BASIC_PHONE_STATE // or READ_PRECISE_PHONE_STATE depending on need
-        else
-            Manifest.permission.READ_PHONE_STATE
+        if (!hasPhonePermission) permissionLauncher.launch(phoneStatePermission())
+    }
 
-        if (ContextCompat.checkSelfPermission(context, permission)
-            == PackageManager.PERMISSION_GRANTED
-        ) {
-            simList = getActiveSimList(context)
-        } else {
-            permissionLauncher.launch(permission)
+    // Load SIMs once permission is available, then keep the hero card fresh.
+    LaunchedEffect(hasPhonePermission) {
+        if (!hasPhonePermission) return@LaunchedEffect
+        simList = getActiveSimList(context)
+        slotCount = getSlotCount(context).coerceAtLeast(simList.size).coerceAtLeast(1)
+        while (true) {
+            snapshot = readNetworkSnapshot(context, simList.getOrNull(selectedSimIndex))
+            delay(4_000)
         }
     }
 
-
-
-
-//    // Load active SIM info
-//    LaunchedEffect(Unit) {
-//        simList = getActiveSimList(context)
-//
-//        // ✅ Retry after small delay if initially empty
-//        if (simList.isEmpty()) {
-//            delay(2000)
-//            simList = getActiveSimList(context)
-//        }
-//    }
+    LaunchedEffect(selectedSimIndex, simList) {
+        if (hasPhonePermission) snapshot = readNetworkSnapshot(context, simList.getOrNull(selectedSimIndex))
+    }
 
     val selectedSim = simList.getOrNull(selectedSimIndex)
 
-    Scaffold { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item { StatusHeroCard(selectedSim = selectedSim, simCount = simList.size) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item { CurrentModeHero(snapshot = snapshot, selectedSim = selectedSim) }
 
-            if (simList.isNotEmpty()) {
-                item { SectionLabel("Active SIM") }
-                items(simList) { sim ->
-                    val index = simList.indexOf(sim)
-                    SimItem(sim, selected = index == selectedSimIndex) {
-                        selectedSimIndex = index
-                    }
-                }
-            } else {
-                item { EmptySimCard() }
-            }
-
-            item { SectionLabel("Network mode") }
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Switch between 4G and 5G",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
-                        )
-                        Text(
-                            text = "Opens the system network panel where you can set the preferred network type for the selected SIM.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
-                        )
-                        Button(
-                            onClick = { openPhoneInfo(context) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Icon(Icons.Default.NetworkCell, contentDescription = null)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("Open Network Settings", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-
-            item { SectionLabel("Monitoring") }
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconBadge(
-                            icon = Icons.Default.NotificationsActive,
-                            tint = if (monitorEnabled) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Network change alerts",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                            Text(
-                                "Get notified when your network drops or changes type.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = monitorEnabled,
-                            onCheckedChange = { enabled ->
-                                monitorEnabled = enabled
-                                if (enabled) NetworkMonitorService.start(context)
-                                else NetworkMonitorService.stop(context)
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionEyebrow("Available SIMs", modifier = Modifier.padding(horizontal = 4.dp))
+                if (simList.isEmpty() && !hasPhonePermission) {
+                    AppCard(contentPadding = PaddingValues(16.dp), onClick = { permissionLauncher.launch(phoneStatePermission()) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconTile(icon = Icons.Default.SimCard, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Phone permission needed", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 15.sp))
+                                Text("Tap to allow reading SIM details.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                        }
+                    }
+                }
+                simList.forEachIndexed { index, sim ->
+                    SimItem(sim = sim, selected = index == selectedSimIndex) { selectedSimIndex = index }
+                }
+                val usedSlots = simList.map { it.simSlotIndex }.toSet()
+                for (slot in 0 until slotCount) {
+                    if (slot !in usedSlots) EmptySlotItem(slot = slot)
+                }
+            }
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                PrimaryActionButton(
+                    text = "Open network settings",
+                    icon = Icons.Default.SettingsInputAntenna,
+                    onClick = { openPhoneInfo(context) }
+                )
+                Text(
+                    "Change the preferred network type for the selected SIM.",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                )
+            }
+        }
+
+        item {
+            AppCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconTile(icon = Icons.Default.NotificationsActive)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Network change alerts", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 15.sp))
+                        Text(
+                            "Notify me when the network drops or changes type.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = monitorEnabled,
+                        onCheckedChange = { enabled ->
+                            monitorEnabled = enabled
+                            if (enabled) NetworkMonitorService.start(context)
+                            else NetworkMonitorService.stop(context)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = Mint,
+                            checkedThumbColor = Color.White,
+                            checkedBorderColor = Color.Transparent,
+                            uncheckedTrackColor = MaterialTheme.colorScheme.outline,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedBorderColor = Color.Transparent
+                        )
+                    )
                 }
             }
         }
@@ -205,171 +204,162 @@ fun NetworkSwitcherScreen() {
 }
 
 @Composable
-private fun StatusHeroCard(selectedSim: SubscriptionInfo?, simCount: Int) {
-    val primary = MaterialTheme.colorScheme.primary
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = primary.copy(alpha = 0.12f)),
-        border = BorderStroke(1.dp, primary.copy(alpha = 0.35f))
-    ) {
+private fun CurrentModeHero(snapshot: NetworkSnapshot?, selectedSim: SubscriptionInfo?) {
+    val (statusText, statusDot) = when (snapshot?.dataState) {
+        TelephonyManager.DATA_CONNECTED -> "Connected" to Mint
+        TelephonyManager.DATA_CONNECTING -> "Connecting" to Amber
+        TelephonyManager.DATA_DISCONNECTED -> "Disconnected" to Danger
+        else -> "Unknown" to LavenderOnNavy
+    }
+    val carrier = snapshot?.carrier?.takeIf { it.isNotBlank() }
+        ?: selectedSim?.carrierName?.toString()
+        ?: "No SIM"
+    val subtitle = listOfNotNull(snapshot?.technology?.takeIf { it.isNotBlank() }, carrier).joinToString(" · ")
+
+    HeroCard {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.SignalCellularAlt,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(
-                    text = "5G / 4G Switcher",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                )
-                Text(
-                    text = when {
-                        selectedSim != null ->
-                            "SIM ${selectedSim.simSlotIndex + 1} · ${selectedSim.carrierName}"
-                        simCount == 0 -> "No SIM detected"
-                        else -> "Select a SIM below"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
+            HeroEyebrow("Current mode")
+            HeroPill(text = statusText, dotColor = statusDot)
         }
-    }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text.uppercase(),
-        style = MaterialTheme.typography.labelMedium.copy(
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 1.2.sp
-        ),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-    )
-}
-
-@Composable
-private fun IconBadge(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color) {
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(tint.copy(alpha = 0.14f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-    }
-}
-
-@Composable
-private fun EmptySimCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            IconBadge(
-                icon = Icons.Default.SettingsInputAntenna,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                "No active SIM cards detected",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                snapshot?.generation ?: "—",
+                style = MaterialTheme.typography.displayLarge,
+                color = Color.White
             )
             Text(
-                "Insert a SIM or grant phone permission to see your carriers here.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.padding(top = 4.dp)
+                subtitle,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = LavenderOnNavy,
+                modifier = Modifier.padding(bottom = 4.dp)
             )
         }
+        HeroCaption("Choose a SIM, then open your phone’s network settings to switch between 4G and 5G.")
     }
 }
 
 @Composable
 fun SimItem(sim: SubscriptionInfo, selected: Boolean, onClick: () -> Unit) {
-    val primary = MaterialTheme.colorScheme.primary
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { onClick() },
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) primary.copy(alpha = 0.10f)
-            else MaterialTheme.colorScheme.surface
-        ),
-        border = BorderStroke(
-            width = if (selected) 1.5.dp else 1.dp,
-            color = if (selected) primary else MaterialTheme.colorScheme.outlineVariant
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 0.dp else 1.dp)
+    val mintTint = MaterialTheme.colorScheme.onSecondaryContainer
+    AppCard(
+        borderColor = if (selected) Mint else MaterialTheme.colorScheme.outline,
+        borderWidth = 2.dp,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        onClick = onClick
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconBadge(
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconTile(
                 icon = Icons.Default.SimCard,
-                tint = if (selected) primary else MaterialTheme.colorScheme.onSurfaceVariant
+                background = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                tint = if (selected) mintTint else MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    text = sim.carrierName?.toString() ?: "Unknown carrier",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                    "SIM ${sim.simSlotIndex + 1} · ${sim.carrierName?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown carrier"}",
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 15.sp),
+                    maxLines = 1
                 )
                 Text(
-                    text = "Slot ${sim.simSlotIndex + 1} · ${sim.number?.takeIf { it.isNotBlank() } ?: "No number"}",
+                    simNumberLabel(sim),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             if (selected) {
-                Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = "Selected",
-                    tint = primary
-                )
+                Icon(Icons.Default.CheckCircle, contentDescription = "Selected", tint = mintTint, modifier = Modifier.size(22.dp))
             }
         }
     }
+}
+
+@Composable
+private fun EmptySlotItem(slot: Int) {
+    AppCard(
+        borderWidth = 2.dp,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.alpha(0.6f)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconTile(icon = Icons.Default.SimCard, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("SIM ${slot + 1}", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 15.sp))
+                Text("Empty slot", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Suppress("DEPRECATION")
+private fun simNumberLabel(sim: SubscriptionInfo): String =
+    sim.number?.takeIf { it.isNotBlank() } ?: "Number unavailable"
+
+/* ---------------- Telephony helpers ---------------- */
+
+private fun phoneStatePermission(): String =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_BASIC_PHONE_STATE
+    else Manifest.permission.READ_PHONE_STATE
+
+private fun hasPhoneStatePermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, phoneStatePermission()) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+
+@Suppress("DEPRECATION")
+private fun getSlotCount(context: Context): Int = try {
+    val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) tm.activeModemCount else tm.phoneCount
+} catch (e: Exception) {
+    1
+}
+
+@Suppress("DEPRECATION", "MissingPermission")
+private fun readNetworkSnapshot(context: Context, sim: SubscriptionInfo?): NetworkSnapshot? = try {
+    val base = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+    val tm = if (sim != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) base.createForSubscriptionId(sim.subscriptionId) else base
+    val type = try { tm.dataNetworkType } catch (e: SecurityException) { tm.networkType }
+    val (gen, tech) = describeNetworkType(type)
+    NetworkSnapshot(
+        generation = gen,
+        technology = tech,
+        carrier = tm.networkOperatorName?.takeIf { it.isNotBlank() } ?: sim?.carrierName?.toString() ?: "",
+        dataState = tm.dataState
+    )
+} catch (e: Exception) {
+    null
+}
+
+/** Maps a TelephonyManager.NETWORK_TYPE_* constant to a generation + technology label. */
+fun describeNetworkType(type: Int): Pair<String, String> = when (type) {
+    TelephonyManager.NETWORK_TYPE_NR -> "5G" to "NR"
+    TelephonyManager.NETWORK_TYPE_LTE -> "4G" to "LTE"
+    TelephonyManager.NETWORK_TYPE_HSPAP -> "3G" to "HSPA+"
+    TelephonyManager.NETWORK_TYPE_HSPA,
+    TelephonyManager.NETWORK_TYPE_HSDPA,
+    TelephonyManager.NETWORK_TYPE_HSUPA -> "3G" to "HSPA"
+    TelephonyManager.NETWORK_TYPE_UMTS -> "3G" to "UMTS"
+    TelephonyManager.NETWORK_TYPE_EVDO_0,
+    TelephonyManager.NETWORK_TYPE_EVDO_A,
+    TelephonyManager.NETWORK_TYPE_EVDO_B,
+    TelephonyManager.NETWORK_TYPE_EHRPD -> "3G" to "EVDO"
+    TelephonyManager.NETWORK_TYPE_TD_SCDMA -> "3G" to "TD-SCDMA"
+    TelephonyManager.NETWORK_TYPE_EDGE -> "2G" to "EDGE"
+    TelephonyManager.NETWORK_TYPE_GPRS -> "2G" to "GPRS"
+    TelephonyManager.NETWORK_TYPE_CDMA,
+    TelephonyManager.NETWORK_TYPE_1xRTT -> "2G" to "CDMA"
+    TelephonyManager.NETWORK_TYPE_GSM -> "2G" to "GSM"
+    TelephonyManager.NETWORK_TYPE_IWLAN -> "Wi-Fi" to "IWLAN"
+    else -> "—" to ""
 }
 
 /**
  * Tries to open the hidden RadioInfo screen first,
  * then falls back to official network settings or system settings.
  */
-
 fun openPhoneInfo(context: Context) {
     val attempts = listOf(
         Intent(Intent.ACTION_MAIN).apply {
@@ -427,4 +417,3 @@ suspend fun getActiveSimList(context: Context): List<SubscriptionInfo> =
             emptyList()
         }
     }
-

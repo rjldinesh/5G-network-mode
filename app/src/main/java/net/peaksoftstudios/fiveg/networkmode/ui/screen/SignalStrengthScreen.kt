@@ -5,26 +5,72 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.telephony.*
+import android.telephony.CellIdentityNr
+import android.telephony.CellInfo
+import android.telephony.CellInfoLte
+import android.telephony.CellInfoNr
+import android.telephony.PhoneStateListener
+import android.telephony.SignalStrength
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyCallback
+import android.telephony.TelephonyManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import net.peaksoftstudios.fiveg.networkmode.manager.SignalEntry
 import net.peaksoftstudios.fiveg.networkmode.manager.SignalHistoryManager
 import net.peaksoftstudios.fiveg.networkmode.ui.components.AnimatedSignalStrengthGauge
+import net.peaksoftstudios.fiveg.networkmode.ui.components.AppCard
+import net.peaksoftstudios.fiveg.networkmode.ui.components.DetailRow
+import net.peaksoftstudios.fiveg.networkmode.ui.components.PermissionCard
+import net.peaksoftstudios.fiveg.networkmode.ui.components.PrimaryActionButton
+import net.peaksoftstudios.fiveg.networkmode.ui.components.SectionEyebrow
 import net.peaksoftstudios.fiveg.networkmode.ui.components.SignalHistoryChart
+import net.peaksoftstudios.fiveg.networkmode.ui.components.StatTile
+import net.peaksoftstudios.fiveg.networkmode.ui.components.signalQualityColor
+import net.peaksoftstudios.fiveg.networkmode.ui.theme.MintDark
 import net.peaksoftstudios.fiveg.networkmode.widget.WidgetKeys
+
+/** Everything the signal screen shows, produced from one SignalStrength callback. */
+data class SignalSnapshot(
+    val dbm: Int? = null,
+    val level: Int = 0,
+    val networkType: String = "Unknown",
+    val carrier: String = "—",
+    val simState: String = "—",
+    val country: String = "—",
+    val mcc: String = "—",
+    val mnc: String = "—",
+    val cellId: String = "N/A",
+    val dataState: String = "—"
+)
 
 @Composable
 fun SignalStrengthScreen() {
@@ -32,20 +78,12 @@ fun SignalStrengthScreen() {
     val telephonyManager =
         remember { context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager }
 
-    var signalDbm by remember { mutableStateOf("—") }
-    var signalLevel by remember { mutableStateOf("—") }
-    var signalLevelInt by remember { mutableIntStateOf(0) }
-    var signalIntDbm by remember { mutableIntStateOf(0) }
+    var snapshot by remember { mutableStateOf(SignalSnapshot()) }
     var historyEntries by remember { mutableStateOf(SignalHistoryManager.snapshot()) }
     // Throttles how often we persist to SharedPreferences / re-render the home screen
     // widget, since raw signal-strength callbacks can fire many times per second.
     var lastWidgetUpdateMs by remember { mutableLongStateOf(0L) }
     val widgetUpdateIntervalMs = 3_000L
-    var networkType by remember { mutableStateOf("Unknown") }
-    var carrierName by remember { mutableStateOf("—") }
-    var simInfo by remember { mutableStateOf("—") }
-    var cellId by remember { mutableStateOf("—") }
-    var dataState by remember { mutableStateOf("—") }
 
     var hasPhonePermission by remember {
         mutableStateOf(
@@ -60,7 +98,6 @@ fun SignalStrengthScreen() {
         )
     }
 
-    // ---- Permission launchers ----
     val phonePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted -> hasPhonePermission = granted }
@@ -69,10 +106,24 @@ fun SignalStrengthScreen() {
         contract = ActivityResultContracts.RequestPermission()
     ) { granted -> hasLocationPermission = granted }
 
-    // Request permissions on launch
     LaunchedEffect(Unit) {
         if (!hasPhonePermission) phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
         if (!hasLocationPermission) locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
+    val onSignal: (TelephonyManager, SignalStrength) -> Unit = { tm, strength ->
+        val next = readSignalSnapshot(context, tm, strength)
+        snapshot = next
+        val dbm = next.dbm
+        if (dbm != null) {
+            val now = System.currentTimeMillis()
+            if (now - lastWidgetUpdateMs >= widgetUpdateIntervalMs) {
+                lastWidgetUpdateMs = now
+                SignalHistoryManager.record(dbm)
+                historyEntries = SignalHistoryManager.snapshot()
+                WidgetKeys.update(context, dbm, next.networkType, next.carrier, signalLevelText(next.level))
+            }
+        }
     }
 
     // ---- Signal listener with API fallback ----
@@ -83,63 +134,19 @@ fun SignalStrengthScreen() {
             val executor = ContextCompat.getMainExecutor(context)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // ✅ Android 12+ modern API
                 val callback = object : TelephonyCallback(), TelephonyCallback.SignalStrengthsListener {
                     @SuppressLint("MissingPermission")
                     override fun onSignalStrengthsChanged(signalStrength: SignalStrength) {
-                        updateSignalUI(context, tmForSim, signalStrength,
-                            onUpdate = { dbm, level, net, carrier, sim, cell, state ->
-                                signalIntDbm = dbm ?: 0
-                                signalDbm = dbm?.let { "$it dBm" } ?: "N/A"
-                                signalLevelInt = level
-                                signalLevel = signalLevelText(level)
-                                networkType = net
-                                carrierName = carrier
-                                simInfo = sim
-                                cellId = cell
-                                dataState = state
-                                if (dbm != null) {
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastWidgetUpdateMs >= widgetUpdateIntervalMs) {
-                                        lastWidgetUpdateMs = now
-                                        SignalHistoryManager.record(dbm)
-                                        historyEntries = SignalHistoryManager.snapshot()
-                                        WidgetKeys.update(context, dbm, net, carrier, signalLevelText(level))
-                                    }
-                                }
-                            })
+                        onSignal(tmForSim, signalStrength)
                     }
                 }
                 tmForSim.registerTelephonyCallback(executor, callback)
                 onDispose { tmForSim.unregisterTelephonyCallback(callback) }
             } else {
-                // ✅ Android 11 and below fallback
                 @Suppress("DEPRECATION")
                 val listener = object : PhoneStateListener() {
                     override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
-                        signalStrength?.let {
-                            updateSignalUI(context, telephonyManager, it,
-                                onUpdate = { dbm, level, net, carrier, sim, cell, state ->
-                                    signalIntDbm = dbm ?: 0
-                                    signalDbm = dbm?.let { "$it dBm" } ?: "N/A"
-                                    signalLevelInt = level
-                                    signalLevel = signalLevelText(level)
-                                    networkType = net
-                                    carrierName = carrier
-                                    simInfo = sim
-                                    cellId = cell
-                                    dataState = state
-                                    if (dbm != null) {
-                                        val now = System.currentTimeMillis()
-                                        if (now - lastWidgetUpdateMs >= widgetUpdateIntervalMs) {
-                                            lastWidgetUpdateMs = now
-                                            SignalHistoryManager.record(dbm)
-                                            historyEntries = SignalHistoryManager.snapshot()
-                                            WidgetKeys.update(context, dbm, net, carrier, signalLevelText(level))
-                                        }
-                                    }
-                                })
-                        }
+                        signalStrength?.let { onSignal(telephonyManager, it) }
                     }
                 }
                 @Suppress("DEPRECATION")
@@ -149,50 +156,104 @@ fun SignalStrengthScreen() {
         } else onDispose { }
     }
 
-    // ---- UI ----
     if (!hasPhonePermission || !hasLocationPermission) {
-        PhoneStatePermissionRequestView(
-            hasPhonePermission = hasPhonePermission,
-            hasLocationPermission = hasLocationPermission,
-            onGrantPhone = { phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE) },
-            onGrantLocation = { locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION) }
-        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            PermissionCard(
+                title = "Permissions required",
+                message = "Phone and location access are needed to read signal strength and cell details.",
+                icon = Icons.Filled.SignalCellularAlt
+            ) {
+                if (!hasPhonePermission) {
+                    PrimaryActionButton(text = "Grant phone permission", height = 48.dp) {
+                        phonePermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+                    }
+                }
+                if (!hasLocationPermission) {
+                    PrimaryActionButton(text = "Grant location permission", height = 48.dp) {
+                        locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                    }
+                }
+            }
+        }
     } else {
-        SignalInfoView(
-            signalDbm = signalDbm,
-            signalLevel = signalLevel,
-            singnalLevelInPercentage = signalLevelInt,
-            singalInIntDbm = signalIntDbm,
-            networkType = networkType,
-            carrierName = carrierName,
-            simInfo = simInfo,
-            cellId = cellId,
-            dataState = dataState,
-            historyEntries = historyEntries
-        )
+        SignalInfoView(snapshot = snapshot, historyEntries = historyEntries)
     }
 }
 
-/* ---------------- Helper functions ---------------- */
+/* ---------------- UI ---------------- */
 
-private fun updateSignalUI(
+@Composable
+private fun SignalInfoView(snapshot: SignalSnapshot, historyEntries: List<SignalEntry>) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        SpeedTestScreen()
+
+        AppCard(radius = 20.dp, contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 16.dp)) {
+            SectionEyebrow("Signal strength")
+            Spacer(Modifier.height(6.dp))
+            AnimatedSignalStrengthGauge(
+                signalLevel = snapshot.level,
+                signalDbm = snapshot.dbm,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile("Network type", snapshot.networkType, Modifier.weight(1f))
+                StatTile("Carrier", snapshot.carrier, Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile("Cell ID", snapshot.cellId, Modifier.weight(1f))
+                StatTile(
+                    "Data",
+                    snapshot.dataState,
+                    Modifier.weight(1f),
+                    valueColor = if (snapshot.dataState == "Connected") MintDark else MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        AppCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SectionEyebrow("SIM details")
+                DetailRow("State", snapshot.simState)
+                DetailRow("Country", snapshot.country)
+                DetailRow("MCC / MNC", "${snapshot.mcc} / ${snapshot.mnc}")
+                DetailRow("Quality", signalLevelText(snapshot.level), valueColor = signalQualityColor(snapshot.level))
+            }
+        }
+
+        SignalHistoryChart(entries = historyEntries)
+    }
+}
+
+/* ---------------- Helpers ---------------- */
+
+private fun readSignalSnapshot(
     context: Context,
     tm: TelephonyManager,
-    signalStrength: SignalStrength,
-    onUpdate: (
-        dbm: Int?, level: Int, network: String,
-        carrier: String, simInfo: String, cellId: String, dataState: String
-    ) -> Unit
-) {
-    var dbm: Int? = null
-    var level = 0
+    signalStrength: SignalStrength
+): SignalSnapshot {
+    var dbm: Int?
+    var level: Int
 
-    // --- Get dBm and level safely ---
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {       // API 29+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         val list = signalStrength.cellSignalStrengths
         dbm = list.firstOrNull { it.dbm != CellInfo.UNAVAILABLE }?.dbm
         level = signalStrength.level
-    } else {                                                    // API 24–28
+    } else {
+        @Suppress("DEPRECATION")
         val asu = signalStrength.gsmSignalStrength
         dbm = if (asu != 99) -113 + 2 * asu else null
         level = when {
@@ -205,51 +266,35 @@ private fun updateSignalUI(
         }
     }
 
-    // --- Network type ---
-    val network = when (tm.networkType) {
-        TelephonyManager.NETWORK_TYPE_LTE -> "4G / LTE"
-        TelephonyManager.NETWORK_TYPE_NR -> "5G NR"
-        TelephonyManager.NETWORK_TYPE_HSPA,
-        TelephonyManager.NETWORK_TYPE_HSPAP -> "3G / HSPA"
-        TelephonyManager.NETWORK_TYPE_EDGE -> "2G / EDGE"
-        TelephonyManager.NETWORK_TYPE_GPRS -> "2G / GPRS"
-        else -> "Unknown"
-    }
+    @Suppress("DEPRECATION")
+    val rawType = tm.networkType
+    val (gen, tech) = describeNetworkType(rawType)
+    val network = if (tech.isBlank()) "Unknown" else "$gen / $tech"
 
-    // --- SIM and carrier info ---
-    val simStateText = getSimStateText(tm.simState)
     val simOperator = tm.simOperator
-    val mcc = if ((simOperator?.length ?: 0) >= 3) simOperator?.substring(0, 3) else "N/A"
-    val mnc = if ((simOperator?.length ?: 0) >= 5) simOperator?.substring(3) else "N/A"
-    val simCountry = tm.simCountryIso?.uppercase() ?: "N/A"
-    val carrier = tm.networkOperatorName ?: "Unknown"
+    val mcc = if ((simOperator?.length ?: 0) >= 3) simOperator.substring(0, 3) else "N/A"
+    val mnc = if ((simOperator?.length ?: 0) >= 5) simOperator.substring(3) else "N/A"
+    val country = tm.simCountryIso?.takeIf { it.isNotBlank() }?.uppercase() ?: "N/A"
+    val carrier = tm.networkOperatorName?.takeIf { it.isNotBlank() } ?: "Unknown"
 
-    val simInfo = buildString {
-        appendLine("SIM State: $simStateText")
-        appendLine("Carrier: $carrier")
-        appendLine("Country: $simCountry")
-        appendLine("MCC: $mcc | MNC: $mnc")
-    }
-
-    // --- Cell ID (LTE for <29, NR for ≥29) ---
     var cell = "N/A"
-    if (
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-        == PackageManager.PERMISSION_GRANTED
-    ) {
-        val cellInfoList = tm.allCellInfo
-        val lteInfo = cellInfoList?.filterIsInstance<CellInfoLte>()?.firstOrNull()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val nrInfo = cellInfoList?.filterIsInstance<CellInfoNr>()?.firstOrNull()
-            cell = lteInfo?.cellIdentity?.ci?.toString()
-                ?: nrInfo?.cellIdentity?.let { (it as? CellIdentityNr)?.nci?.toString() }
-                        ?: "N/A"
-        } else {
-            cell = lteInfo?.cellIdentity?.ci?.toString() ?: "N/A"
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+        try {
+            val cellInfoList = tm.allCellInfo
+            val lteInfo = cellInfoList?.filterIsInstance<CellInfoLte>()?.firstOrNull()
+            cell = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val nrInfo = cellInfoList?.filterIsInstance<CellInfoNr>()?.firstOrNull()
+                lteInfo?.cellIdentity?.ci?.toString()
+                    ?: (nrInfo?.cellIdentity as? CellIdentityNr)?.nci?.toString()
+                    ?: "N/A"
+            } else {
+                lteInfo?.cellIdentity?.ci?.toString() ?: "N/A"
+            }
+        } catch (e: SecurityException) {
+            cell = "N/A"
         }
     }
 
-    // --- Data connection state ---
     val dataState = when (tm.dataState) {
         TelephonyManager.DATA_CONNECTED -> "Connected"
         TelephonyManager.DATA_CONNECTING -> "Connecting"
@@ -257,7 +302,18 @@ private fun updateSignalUI(
         else -> "Unknown"
     }
 
-    onUpdate(dbm, level, network, carrier, simInfo, cell, dataState)
+    return SignalSnapshot(
+        dbm = dbm,
+        level = level,
+        networkType = network,
+        carrier = carrier,
+        simState = getSimStateText(tm.simState),
+        country = country,
+        mcc = mcc,
+        mnc = mnc,
+        cellId = cell,
+        dataState = dataState
+    )
 }
 
 private fun signalLevelText(level: Int): String = when (level) {
@@ -265,164 +321,14 @@ private fun signalLevelText(level: Int): String = when (level) {
     3 -> "Good"
     2 -> "Fair"
     1 -> "Poor"
-    else -> "No Signal"
-}
-
-/* ---------------- UI Composables ---------------- */
-
-@Composable
-private fun SignalInfoView(
-    signalDbm: String,
-    signalLevel: String,
-    singnalLevelInPercentage: Int,
-    singalInIntDbm: Int,
-    networkType: String,
-    carrierName: String,
-    simInfo: String,
-    cellId: String,
-    dataState: String,
-    historyEntries: List<SignalEntry>
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-    ) {
-        // ---- Speed Test (top) ----
-        Text(
-            "Speed Test",
-            style = MaterialTheme.typography.titleMedium.copy(
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            ),
-            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-        )
-        SpeedTestScreen()
-
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Signal gauge ----
-        AnimatedSignalStrengthGauge(
-            signalLevel = singnalLevelInPercentage,
-            signalDbm = singalInIntDbm,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Two-column info grid ----
-        val infoItems = listOf(
-            "Signal (dBm)" to signalDbm,
-            "Signal Quality" to signalLevel,
-            "Network Type" to networkType,
-            "Carrier" to carrierName,
-            "Cell ID" to cellId,
-            "Data Connection" to dataState,
-        )
-
-        infoItems.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                pair.forEach { (title, value) ->
-                    InfoCard(title, value, Modifier.weight(1f))
-                }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-
-        // SIM Details — full width
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ) {
-            Column(Modifier.padding(12.dp)) {
-                Text(
-                    "SIM Details",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    simInfo,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        SignalHistoryChart(
-            entries = historyEntries,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun InfoCard(title: String, value: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                value,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
-@Composable
-private fun PhoneStatePermissionRequestView(
-    hasPhonePermission: Boolean,
-    hasLocationPermission: Boolean,
-    onGrantPhone: () -> Unit,
-    onGrantLocation: () -> Unit
-) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                "Permissions Required",
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.height(8.dp))
-            Text("This app needs Phone and Location permissions to show signal details.")
-            Spacer(Modifier.height(16.dp))
-            if (!hasPhonePermission)
-                Button(onClick = onGrantPhone) { Text("Grant Phone Permission") }
-            Spacer(Modifier.height(8.dp))
-            if (!hasLocationPermission)
-                Button(onClick = onGrantLocation) { Text("Grant Location Permission") }
-        }
-    }
+    else -> "No signal"
 }
 
 private fun getSimStateText(state: Int): String = when (state) {
     TelephonyManager.SIM_STATE_READY -> "Ready"
     TelephonyManager.SIM_STATE_ABSENT -> "Absent"
-    TelephonyManager.SIM_STATE_PIN_REQUIRED -> "PIN Required"
-    TelephonyManager.SIM_STATE_PUK_REQUIRED -> "PUK Required"
-    TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "Network Locked"
+    TelephonyManager.SIM_STATE_PIN_REQUIRED -> "PIN required"
+    TelephonyManager.SIM_STATE_PUK_REQUIRED -> "PUK required"
+    TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "Network locked"
     else -> "Unknown"
 }

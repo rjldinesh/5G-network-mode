@@ -1,5 +1,6 @@
 package net.peaksoftstudios.fiveg.networkmode.ui.screen
 
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
@@ -16,7 +17,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import net.peaksoftstudios.fiveg.networkmode.ui.components.AppLogo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,23 +30,26 @@ fun MainTopBar(
     var menuExpanded by remember { mutableStateOf(false) }
 
     TopAppBar(
+        navigationIcon = {
+            AppLogo(size = 30.dp, modifier = Modifier.padding(start = 20.dp, end = 4.dp))
+        },
         title = {
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White
+                color = MaterialTheme.colorScheme.primary
             )
         },
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            titleContentColor = Color.White
+            containerColor = MaterialTheme.colorScheme.background,
+            titleContentColor = MaterialTheme.colorScheme.primary
         ),
         actions = {
-            IconButton(onClick = { menuExpanded = true }) {
+            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.padding(end = 8.dp)) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "More",
-                    tint = Color.White
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
 
@@ -52,7 +58,7 @@ fun MainTopBar(
                 onDismissRequest = { menuExpanded = false }
             ) {
                 DropdownMenuItem(
-                    text = { Text("About Us") },
+                    text = { Text("About", style = MaterialTheme.typography.bodyMedium) },
                     onClick = {
                         menuExpanded = false
                         onAboutClick()
