@@ -9,7 +9,6 @@ import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import net.peaksoftstudios.fiveg.networkmode.R
@@ -43,7 +42,7 @@ fun MainScreen() {
                 )
             },
             bottomBar = {
-                NavigationBar(containerColor = Color.White) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     val items = listOf(
                         Triple(Icons.Filled.Home,  R.string.network, 0),
                         Triple(Icons.Filled.SignalCellularAlt, R.string.signal, 1),
@@ -53,7 +52,8 @@ fun MainScreen() {
 
                     items.forEach { (icon, labelRes, index) ->
                         val isSelected = selectedTab == index
-                        val tintColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
+                        val tintColor = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                         val textStyle = MaterialTheme.typography.bodySmall.copy(color = tintColor)
 
                         NavigationBarItem(

@@ -83,9 +83,10 @@ fun _4GNetworkModeTheme(
             if (activity != null) {
                 val insetsController = WindowCompat.getInsetsController(activity.window, view)
                 insetsController.isAppearanceLightStatusBars = useDarkStatusBarIcons
-                // The bottom NavigationBar in MainScreen is always drawn with a white
-                // background, so its icons/labels need dark system nav bar icons for contrast.
-                insetsController.isAppearanceLightNavigationBars = true
+                // The bottom NavigationBar uses colorScheme.surface, so system nav icons
+                // must flip with it for contrast.
+                insetsController.isAppearanceLightNavigationBars =
+                    colorScheme.surface.luminance() > 0.5f
             }
         }
     }

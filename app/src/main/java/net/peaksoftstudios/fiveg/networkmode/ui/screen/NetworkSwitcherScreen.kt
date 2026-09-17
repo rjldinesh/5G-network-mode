@@ -13,16 +13,25 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NetworkCell
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.SettingsInputAntenna
+import androidx.compose.material.icons.filled.SimCard
+import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -91,107 +100,153 @@ fun NetworkSwitcherScreen() {
 //        }
 //    }
 
-    Scaffold(
-        topBar = {
+    val selectedSim = simList.getOrNull(selectedSimIndex)
 
-        }
-    ) { innerPadding ->
-        Column(
+    Scaffold { innerPadding ->
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(innerPadding),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header instructions
-            Text(
-                text = "Select your SIM slot and switch between available network modes (4G / 5G).",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    color = Color.Gray,
-                    fontSize = 15.sp
-                ),
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            item { StatusHeroCard(selectedSim = selectedSim, simCount = simList.size) }
 
             if (simList.isNotEmpty()) {
-                Text(
-                    text = "Available SIMs:",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
+                item { SectionLabel("Active SIM") }
+                items(simList) { sim ->
+                    val index = simList.indexOf(sim)
+                    SimItem(sim, selected = index == selectedSimIndex) {
+                        selectedSimIndex = index
+                    }
+                }
+            } else {
+                item { EmptySimCard() }
+            }
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
+            item { SectionLabel("Network mode") }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
-                    items(simList) { sim ->
-                        val isSelected = simList.indexOf(sim) == selectedSimIndex
-                        SimItem(sim, isSelected) {
-                            selectedSimIndex = simList.indexOf(sim)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Switch between 4G and 5G",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                        Text(
+                            text = "Opens the system network panel where you can set the preferred network type for the selected SIM.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                        )
+                        Button(
+                            onClick = { openPhoneInfo(context) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.NetworkCell, contentDescription = null)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Open Network Settings", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
+            }
 
+            item { SectionLabel("Monitoring") }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconBadge(
+                            icon = Icons.Default.NotificationsActive,
+                            tint = if (monitorEnabled) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Network change alerts",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                            Text(
+                                "Get notified when your network drops or changes type.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = monitorEnabled,
+                            onCheckedChange = { enabled ->
+                                monitorEnabled = enabled
+                                if (enabled) NetworkMonitorService.start(context)
+                                else NetworkMonitorService.stop(context)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
-            } else {
-                Text(
-                    "No active SIM cards detected.",
-                    color = Color.Gray,
-                    modifier = Modifier.padding(top = 32.dp)
+@Composable
+private fun StatusHeroCard(selectedSim: SubscriptionInfo?, simCount: Int) {
+    val primary = MaterialTheme.colorScheme.primary
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = primary.copy(alpha = 0.12f)),
+        border = BorderStroke(1.dp, primary.copy(alpha = 0.35f))
+    ) {
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.SignalCellularAlt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(28.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Action button
-            Button(
-                onClick = {
-                    openPhoneInfo(context)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Icon(Icons.Default.NetworkCell, contentDescription = "Network", tint = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Open Network Settings", color = Color.White)
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Use this option to manually change network preferences for the selected SIM.",
-                style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray),
-                modifier = Modifier.padding(horizontal = 8.dp),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider()
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Network Change Alerts",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                    )
-                    Text(
-                        "Get notified when your network drops or changes type.",
-                        style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray)
-                    )
-                }
-                Switch(
-                    checked = monitorEnabled,
-                    onCheckedChange = { enabled ->
-                        monitorEnabled = enabled
-                        if (enabled) NetworkMonitorService.start(context)
-                        else NetworkMonitorService.stop(context)
-                    }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(
+                    text = "5G / 4G Switcher",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(
+                    text = when {
+                        selectedSim != null ->
+                            "SIM ${selectedSim.simSlotIndex + 1} · ${selectedSim.carrierName}"
+                        simCount == 0 -> "No SIM detected"
+                        else -> "Select a SIM below"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
             }
         }
@@ -199,32 +254,113 @@ fun NetworkSwitcherScreen() {
 }
 
 @Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text = text.uppercase(),
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.2.sp
+        ),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+    )
+}
+
+@Composable
+private fun IconBadge(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(tint.copy(alpha = 0.14f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun EmptySimCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            IconBadge(
+                icon = Icons.Default.SettingsInputAntenna,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "No active SIM cards detected",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Text(
+                "Insert a SIM or grant phone permission to see your carriers here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun SimItem(sim: SubscriptionInfo, selected: Boolean, onClick: () -> Unit) {
+    val primary = MaterialTheme.colorScheme.primary
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
             .clickable { onClick() },
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (selected)
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-            else
-                MaterialTheme.colorScheme.surface
+            containerColor = if (selected) primary.copy(alpha = 0.10f)
+            else MaterialTheme.colorScheme.surface
         ),
-        border = if (selected)
-            BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
-        else
-            BorderStroke(1.dp, Color.LightGray)
+        border = BorderStroke(
+            width = if (selected) 1.5.dp else 1.dp,
+            color = if (selected) primary else MaterialTheme.colorScheme.outlineVariant
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 0.dp else 1.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "SIM ${sim.simSlotIndex + 1}: ${sim.carrierName}",
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconBadge(
+                icon = Icons.Default.SimCard,
+                tint = if (selected) primary else MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Text(
-                text = "Number: ${sim.number ?: "N/A"}",
-                style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray)
-            )
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = sim.carrierName?.toString() ?: "Unknown carrier",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Text(
+                    text = "Slot ${sim.simSlotIndex + 1} · ${sim.number?.takeIf { it.isNotBlank() } ?: "No number"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (selected) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = primary
+                )
+            }
         }
     }
 }
