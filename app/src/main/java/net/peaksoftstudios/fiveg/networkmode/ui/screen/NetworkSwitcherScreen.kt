@@ -1,9 +1,12 @@
 package net.peaksoftstudios.fiveg.networkmode.ui.screen
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.telephony.SubscriptionInfo
@@ -29,12 +32,15 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.SimCard
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,7 +56,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -85,18 +95,88 @@ fun NetworkSwitcherScreen() {
     var monitorEnabled by remember { mutableStateOf(NetworkMonitorService.isEnabled(context)) }
     var snapshot by remember { mutableStateOf<NetworkSnapshot?>(null) }
     var hasPhonePermission by remember { mutableStateOf(hasPhoneStatePermission(context)) }
+    // True once the system refuses to show the dialog again ("Don't ask again" / denied twice).
+    var permissionPermanentlyDenied by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // True while a request was started by the user tapping the card (vs. the silent startup request).
+    var userInitiatedRequest by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasPhonePermission = isGranted
-        if (!isGranted) {
-            Toast.makeText(context, "Permission required to read SIM info", Toast.LENGTH_SHORT).show()
+        val fromTap = userInitiatedRequest
+        userInitiatedRequest = false
+        if (isGranted) {
+            permissionPermanentlyDenied = false
+            return@rememberLauncherForActivityResult
+        }
+        val activity = context.findActivity()
+        val canAskAgain = activity != null &&
+            ActivityCompat.shouldShowRequestPermissionRationale(activity, PHONE_STATE_PERMISSION)
+        if (canAskAgain) {
+            // The system dialog was really shown and the user declined once.
+            markPhonePermissionDialogSeen(context)
+            permissionPermanentlyDenied = false
+            if (fromTap) Toast.makeText(context, "Permission required to read SIM info", Toast.LENGTH_SHORT).show()
+        } else {
+            // No dialog will be shown again. Only treat this as "denied for good" if the user has
+            // actually seen the dialog before; otherwise the request was auto-cancelled (e.g. another
+            // permission prompt was already on screen) and a later tap will still show the dialog.
+            permissionPermanentlyDenied = hasSeenPhonePermissionDialog(context)
+            if (fromTap) {
+                if (permissionPermanentlyDenied) showSettingsDialog = true
+                else Toast.makeText(context, "Permission required to read SIM info", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun requestPhonePermission() {
+        if (permissionPermanentlyDenied) {
+            showSettingsDialog = true
+        } else {
+            userInitiatedRequest = true
+            permissionLauncher.launch(PHONE_STATE_PERMISSION)
         }
     }
 
     LaunchedEffect(Unit) {
-        if (!hasPhonePermission) permissionLauncher.launch(phoneStatePermission())
+        if (!hasPhonePermission) {
+            userInitiatedRequest = false
+            permissionLauncher.launch(PHONE_STATE_PERMISSION)
+        }
+    }
+
+    // Re-check when the user comes back from the app settings screen.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val granted = hasPhoneStatePermission(context)
+                if (granted) permissionPermanentlyDenied = false
+                hasPhonePermission = granted
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (showSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            title = { Text("Phone permission needed") },
+            text = { Text("Phone permission was turned off, so SIM details can't be read. Open app settings and allow the Phone permission.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSettingsDialog = false
+                    openAppSettings(context)
+                }) { Text("Open settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSettingsDialog = false }) { Text("Not now") }
+            }
+        )
     }
 
     // Load SIMs once permission is available, then keep the hero card fresh.
@@ -127,13 +207,13 @@ fun NetworkSwitcherScreen() {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionEyebrow("Available SIMs", modifier = Modifier.padding(horizontal = 4.dp))
                 if (simList.isEmpty() && !hasPhonePermission) {
-                    AppCard(contentPadding = PaddingValues(16.dp), onClick = { permissionLauncher.launch(phoneStatePermission()) }) {
+                    AppCard(contentPadding = PaddingValues(16.dp), onClick = { requestPhonePermission() }) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconTile(icon = Icons.Default.SimCard, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("Phone permission needed", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 15.sp))
-                                Text("Tap to allow reading SIM details.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (permissionPermanentlyDenied) "Tap to open app settings and allow it." else "Tap to allow reading SIM details.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -301,13 +381,44 @@ private fun simNumberLabel(sim: SubscriptionInfo): String =
 
 /* ---------------- Telephony helpers ---------------- */
 
-private fun phoneStatePermission(): String =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.READ_BASIC_PHONE_STATE
-    else Manifest.permission.READ_PHONE_STATE
+/**
+ * SubscriptionManager.getActiveSubscriptionInfoList requires READ_PHONE_STATE on every API level.
+ * READ_BASIC_PHONE_STATE (API 33+) is a normal, install-time permission that is not declared in the
+ * manifest, so requesting it never shows a dialog and is auto-denied.
+ */
+private const val PHONE_STATE_PERMISSION = Manifest.permission.READ_PHONE_STATE
 
 private fun hasPhoneStatePermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, phoneStatePermission()) == PackageManager.PERMISSION_GRANTED ||
-        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+    ContextCompat.checkSelfPermission(context, PHONE_STATE_PERMISSION) == PackageManager.PERMISSION_GRANTED
+
+private const val PERMISSION_PREFS = "permission_prefs"
+private const val KEY_PHONE_DIALOG_SEEN = "phone_permission_dialog_seen"
+
+private fun hasSeenPhonePermissionDialog(context: Context): Boolean =
+    context.getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PHONE_DIALOG_SEEN, false)
+
+private fun markPhonePermissionDialogSeen(context: Context) {
+    context.getSharedPreferences(PERMISSION_PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PHONE_DIALOG_SEEN, true).apply()
+}
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+private fun openAppSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Couldn't open app settings", Toast.LENGTH_SHORT).show()
+    }
+}
 
 @Suppress("DEPRECATION")
 private fun getSlotCount(context: Context): Int = try {
